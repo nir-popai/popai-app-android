@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Popai Logo for App Icon -->
+    <!-- AI Brain symbol -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,44 Q34,34 44,34 L64,34 Q74,34 74,44 L74,64 Q74,74 64,74 L44,74 Q34,74 34,64 Z"/>
+
+    <!-- Circuit lines -->
+    <path
+        android:strokeColor="#6366F1"
+        android:strokeWidth="3"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M44,44 L44,54 M64,44 L64,54 M44,60 L44,70 M64,60 L64,70"/>
+
+    <!-- Recording indicator dot -->
+    <path
+        android:fillColor="#EF4444"
+        android:pathData="M78,38 A6,6 0 1,1 78,38 Z"/>
+
+</vector>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+
+    <!-- Background circle -->
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M60,10 A50,50 0 1,1 60,110 A50,50 0 1,1 60,10 Z"/>
+
+    <!-- AI Brain symbol -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,45 Q40,35 50,35 L70,35 Q80,35 80,45 L80,75 Q80,85 70,85 L50,85 Q40,85 40,75 Z"/>
+
+    <!-- Circuit lines -->
+    <path
+        android:strokeColor="#6366F1"
+        android:strokeWidth="3"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M50,45 L50,55 M70,45 L70,55 M50,65 L50,75 M70,65 L70,75"/>
+
+    <!-- Pop/Recording circle -->
+    <path
+        android:fillColor="#EF4444"
+        android:pathData="M85,35 A8,8 0 1,1 85,35 Z"/>
+</vector>

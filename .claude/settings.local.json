@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(./gradlew test:*)",
+      "Bash(.gradlew.bat test:*)",
+      "Bash(gradlew.bat test:*)",
+      "Bash(java:*)",
+      "Bash(where java)",
+      "Read(//c/Program Files/**)",
+      "Bash(\"C:/Program Files/Android/Android Studio/jbr/bin/java.exe\" -version)",
+      "Bash(export JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\")",
+      "Bash(cat:*)",
+      "Bash(./gradlew:*)",
+      "Bash(unzip:*)",
+      "Bash(jar tf:*)",
+      "Read(//c/Users/nirma/AndroidStudioProjects/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
