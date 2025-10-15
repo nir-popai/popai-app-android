@@ -65,9 +65,51 @@ class RecordingsActivity : AppCompatActivity() {
 
     private fun retryUpload(recording: RecordingEntity) {
         lifecycleScope.launch {
-            val uploadService = UploadService()
-            uploadService.retryFailedUploads(recording.id)
+            // Debug: Log all chunks for this recording
+            val allChunks = database.chunkDao().getChunksForRecordingSync(recording.id)
+            android.util.Log.d("RecordingsActivity", "=== Chunks for recording ${recording.id} ===")
+            allChunks.forEach { chunk ->
+                android.util.Log.d("RecordingsActivity",
+                    "Chunk ${chunk.chunkIndex}: " +
+                    "status=${chunk.uploadStatus}, " +
+                    "fileSize=${chunk.fileSize}, " +
+                    "duration=${chunk.durationMs}, " +
+                    "s3Key=${chunk.s3Key}, " +
+                    "error=${chunk.lastError}, " +
+                    "path=${chunk.localFilePath}")
+            }
+            android.util.Log.d("RecordingsActivity", "=== End chunks ===")
 
+            // Reset failed chunks to pending status
+            val failedChunks = database.chunkDao().getChunksByRecordingAndStatus(
+                recording.id,
+                com.example.popai.database.UploadStatus.FAILED
+            )
+
+            failedChunks.forEach { chunk ->
+                database.chunkDao().updateChunk(
+                    chunk.copy(
+                        uploadStatus = com.example.popai.database.UploadStatus.PENDING,
+                        lastError = null
+                    )
+                )
+            }
+
+            // Also reset PENDING chunks that might have been left in limbo
+            val pendingChunks = database.chunkDao().getChunksByRecordingAndStatus(
+                recording.id,
+                com.example.popai.database.UploadStatus.PENDING
+            )
+
+            // Update recording status back to UPLOADING
+            database.recordingDao().updateRecording(
+                recording.copy(
+                    status = com.example.popai.database.RecordingStatus.UPLOADING,
+                    errorMessage = null
+                )
+            )
+
+            // Start upload service
             val intent = Intent(this@RecordingsActivity, UploadService::class.java).apply {
                 putExtra("recording_id", recording.id)
             }

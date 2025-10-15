@@ -1,29 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="120dp"
-    android:height="120dp"
-    android:viewportWidth="120"
-    android:viewportHeight="120">
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="19.39"
+    android:viewportHeight="27.33">
 
-    <!-- Background circle -->
+    <!-- Waveform - First bar -->
     <path
-        android:fillColor="#6366F1"
-        android:pathData="M60,10 A50,50 0 1,1 60,110 A50,50 0 1,1 60,10 Z"/>
+        android:fillColor="#18181B"
+        android:pathData="M1.61642,11.0504V11.0504C3.10883,11.0504 4.31866,12.2602 4.31866,13.7526V16.1727V16.1727C2.82626,16.1727 1.61642,14.9629 1.61642,13.4705V11.0504Z"/>
 
-    <!-- AI Brain symbol -->
+    <!-- Waveform - Second bar -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M40,45 Q40,35 50,35 L70,35 Q80,35 80,45 L80,75 Q80,85 70,85 L50,85 Q40,85 40,75 Z"/>
+        android:fillColor="#18181B"
+        android:pathData="M5.38388,8.60547V8.60547C6.87629,8.60547 8.08612,9.8153 8.08612,11.3077V18.6175V18.6175C6.59371,18.6175 5.38388,17.4077 5.38388,15.9153V8.60547Z"/>
 
-    <!-- Circuit lines -->
+    <!-- Waveform - Third bar (tallest) -->
     <path
-        android:strokeColor="#6366F1"
-        android:strokeWidth="3"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M50,45 L50,55 M70,45 L70,55 M50,65 L50,75 M70,65 L70,75"/>
+        android:fillColor="#18181B"
+        android:pathData="M9.15134,5.85583V5.85583C10.6437,5.85583 11.8536,7.06567 11.8536,8.55807V21.3672V21.3672C10.3612,21.3672 9.15134,20.1574 9.15134,18.665V5.85583Z"/>
 
-    <!-- Pop/Recording circle -->
+    <!-- Waveform - Fourth bar -->
     <path
-        android:fillColor="#EF4444"
-        android:pathData="M85,35 A8,8 0 1,1 85,35 Z"/>
+        android:fillColor="#18181B"
+        android:pathData="M12.9188,7.03668V7.03668C14.4112,7.03668 15.621,8.24652 15.621,9.73892V20.1864V20.1864C14.1286,20.1864 12.9188,18.9765 12.9188,17.4841V7.03668Z"/>
+
+    <!-- Waveform - Fifth bar -->
+    <path
+        android:fillColor="#18181B"
+        android:pathData="M16.6862,9.66589V9.66589C18.1787,9.66589 19.3885,10.8757 19.3885,12.3681V17.5571V17.5571C17.8961,17.5571 16.6862,16.3473 16.6862,14.8549V9.66589Z"/>
+
 </vector>

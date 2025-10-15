@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="120dp"
+            android:height="60dp"
+            android:viewportWidth="120"
+            android:viewportHeight="60">
+
+            <!-- Five waveform bars that will animate -->
+            <group android:name="bar1">
+                <path
+                    android:name="bar1Path"
+                    android:fillColor="@color/accent"
+                    android:pathData="M5,25 L15,25 L15,35 L5,35 Z"/>
+            </group>
+
+            <group android:name="bar2">
+                <path
+                    android:name="bar2Path"
+                    android:fillColor="@color/accent"
+                    android:pathData="M25,20 L35,20 L35,40 L25,40 Z"/>
+            </group>
+
+            <group android:name="bar3">
+                <path
+                    android:name="bar3Path"
+                    android:fillColor="@color/accent"
+                    android:pathData="M45,10 L55,10 L55,50 L45,50 Z"/>
+            </group>
+
+            <group android:name="bar4">
+                <path
+                    android:name="bar4Path"
+                    android:fillColor="@color/accent"
+                    android:pathData="M65,15 L75,15 L75,45 L65,45 Z"/>
+            </group>
+
+            <group android:name="bar5">
+                <path
+                    android:name="bar5Path"
+                    android:fillColor="@color/accent"
+                    android:pathData="M85,22 L95,22 L95,38 L85,38 Z"/>
+            </group>
+        </vector>
+    </aapt:attr>
+
+    <!-- Animate bar 1 -->
+    <target android:name="bar1Path">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="800"
+                android:propertyName="pathData"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:valueFrom="M5,25 L15,25 L15,35 L5,35 Z"
+                android:valueTo="M5,20 L15,20 L15,40 L5,40 Z"
+                android:valueType="pathType"/>
+        </aapt:attr>
+    </target>
+
+    <!-- Animate bar 2 -->
+    <target android:name="bar2Path">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="600"
+                android:propertyName="pathData"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:startOffset="100"
+                android:valueFrom="M25,20 L35,20 L35,40 L25,40 Z"
+                android:valueTo="M25,12 L35,12 L35,48 L25,48 Z"
+                android:valueType="pathType"/>
+        </aapt:attr>
+    </target>
+
+    <!-- Animate bar 3 -->
+    <target android:name="bar3Path">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="700"
+                android:propertyName="pathData"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:startOffset="200"
+                android:valueFrom="M45,10 L55,10 L55,50 L45,50 Z"
+                android:valueTo="M45,5 L55,5 L55,55 L45,55 Z"
+                android:valueType="pathType"/>
+        </aapt:attr>
+    </target>
+
+    <!-- Animate bar 4 -->
+    <target android:name="bar4Path">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="650"
+                android:propertyName="pathData"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:startOffset="300"
+                android:valueFrom="M65,15 L75,15 L75,45 L65,45 Z"
+                android:valueTo="M65,8 L75,8 L75,52 L65,52 Z"
+                android:valueType="pathType"/>
+        </aapt:attr>
+    </target>
+
+    <!-- Animate bar 5 -->
+    <target android:name="bar5Path">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="750"
+                android:propertyName="pathData"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:startOffset="400"
+                android:valueFrom="M85,22 L95,22 L95,38 L85,38 Z"
+                android:valueTo="M85,18 L95,18 L95,42 L85,42 Z"
+                android:valueType="pathType"/>
+        </aapt:attr>
+    </target>
+</animated-vector>

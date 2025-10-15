@@ -9,16 +9,16 @@
     <color name="white">#FFFFFFFF</color>
 
     <!-- Popai Brand Colors -->
-    <color name="primary">#6366F1</color>
-    <color name="primary_dark">#4F46E5</color>
-    <color name="primary_light">#818CF8</color>
-    <color name="accent">#EF4444</color>
+    <color name="primary">#D9F99D</color>
+    <color name="primary_dark">#BEF264</color>
+    <color name="primary_light">#ECFCCB</color>
+    <color name="accent">#4D65FF</color>
     <color name="background">#F8FAFC</color>
     <color name="surface">#FFFFFF</color>
-    <color name="text_primary">#1E293B</color>
-    <color name="text_secondary">#64748B</color>
+    <color name="text_primary">#18181B</color>
+    <color name="text_secondary">#52525B</color>
     <color name="success">#10B981</color>
     <color name="error">#EF4444</color>
     <color name="card_background">#FFFFFF</color>
-    <color name="divider">#E2E8F0</color>
+    <color name="divider">#E4E4E7</color>
 </resources>

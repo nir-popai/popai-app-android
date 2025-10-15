@@ -192,15 +192,32 @@ class RecordingService : LifecycleService() {
 
     fun stopRecording() {
         chunkTimer?.cancel()
-        stopCurrentChunk()
 
         lifecycleScope.launch {
+            // Stop and encrypt current chunk
+            try {
+                mediaRecorder?.apply {
+                    stop()
+                    release()
+                }
+                mediaRecorder = null
+
+                // Give MediaRecorder time to finalize the file
+                delay(500)
+
+                encryptCurrentChunk()
+                currentChunkIndex++
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
             currentRecordingId?.let { recordingId ->
                 val recording = database.recordingDao().getRecordingById(recordingId)
                 recording?.let {
                     val updatedRecording = it.copy(
                         endTime = System.currentTimeMillis(),
-                        totalDurationMs = System.currentTimeMillis() - it.startTime,
+                        totalDurationMs = System.currentTimeMillis() - it.startTime - totalPausedTime,
+                        pausedDurationMs = totalPausedTime,
                         status = RecordingStatus.COMPLETED,
                         chunkCount = currentChunkIndex
                     )
@@ -210,11 +227,16 @@ class RecordingService : LifecycleService() {
                 // Start upload process
                 startUploadService(recordingId)
             }
-        }
 
-        currentRecordingId = null
-        stopForeground(true)
-        stopSelf()
+            currentRecordingId = null
+            isPaused = false
+            totalPausedTime = 0
+
+            withContext(Dispatchers.Main) {
+                stopForeground(true)
+                stopSelf()
+            }
+        }
     }
 
     private fun startNewChunk() {
@@ -277,6 +299,8 @@ class RecordingService : LifecycleService() {
 
             // Encrypt the chunk
             lifecycleScope.launch {
+                // Give MediaRecorder time to finalize the file
+                delay(500)
                 encryptCurrentChunk()
             }
 
@@ -289,26 +313,73 @@ class RecordingService : LifecycleService() {
     private suspend fun encryptCurrentChunk() {
         withContext(Dispatchers.IO) {
             val chunks = database.chunkDao().getChunksForRecordingSync(currentRecordingId!!)
-            val lastChunk = chunks.lastOrNull() ?: return@withContext
+            val lastChunk = chunks.lastOrNull()
+
+            if (lastChunk == null) {
+                android.util.Log.e("RecordingService", "encryptCurrentChunk: No chunk found for recording $currentRecordingId")
+                return@withContext
+            }
 
             val inputFile = File(lastChunk.localFilePath)
-            if (!inputFile.exists()) return@withContext
+            val duration = System.currentTimeMillis() - chunkStartTime
 
+            android.util.Log.d("RecordingService", "Encrypting chunk ${lastChunk.chunkIndex}: path=${lastChunk.localFilePath}, exists=${inputFile.exists()}")
+
+            if (!inputFile.exists()) {
+                // File doesn't exist - update chunk with error
+                android.util.Log.e("RecordingService", "Audio file NOT FOUND: ${lastChunk.localFilePath}")
+                val updatedChunk = lastChunk.copy(
+                    durationMs = duration,
+                    fileSize = 0,
+                    uploadStatus = UploadStatus.FAILED,
+                    lastError = "Audio file not found after recording stopped"
+                )
+                database.chunkDao().updateChunk(updatedChunk)
+                return@withContext
+            }
+
+            val fileSize = inputFile.length()
+            android.util.Log.d("RecordingService", "Audio file size: $fileSize bytes, duration: $duration ms")
+
+            if (fileSize == 0L) {
+                // File is empty - update chunk with error
+                android.util.Log.e("RecordingService", "Audio file is EMPTY (0 bytes): ${lastChunk.localFilePath}")
+                val updatedChunk = lastChunk.copy(
+                    durationMs = duration,
+                    fileSize = 0,
+                    uploadStatus = UploadStatus.FAILED,
+                    lastError = "Audio file is empty (0 bytes)"
+                )
+                database.chunkDao().updateChunk(updatedChunk)
+                return@withContext
+            }
+
+            // File exists and has content - update duration and size first
+            android.util.Log.d("RecordingService", "Updating chunk metadata: size=$fileSize, duration=$duration")
+            database.chunkDao().updateChunk(
+                lastChunk.copy(
+                    durationMs = duration,
+                    fileSize = fileSize
+                )
+            )
+
+            // Then attempt encryption
             val encryptedFile = File(inputFile.parent, "${inputFile.nameWithoutExtension}.encrypted")
-
+            android.util.Log.d("RecordingService", "Attempting encryption to: ${encryptedFile.absolutePath}")
             val encrypted = encryptionManager.encryptFile(inputFile, encryptedFile)
 
             if (encrypted) {
-                val duration = System.currentTimeMillis() - chunkStartTime
+                android.util.Log.d("RecordingService", "Encryption successful")
                 val updatedChunk = lastChunk.copy(
                     encryptedFilePath = encryptedFile.absolutePath,
                     durationMs = duration,
-                    fileSize = encryptedFile.length()
+                    fileSize = fileSize
                 )
                 database.chunkDao().updateChunk(updatedChunk)
-
-                // Delete unencrypted file
-                inputFile.delete()
+                // Keep raw file for upload - don't delete it
+                // Raw files will be deleted after successful upload
+            } else {
+                android.util.Log.e("RecordingService", "Encryption FAILED")
             }
         }
     }
@@ -329,7 +400,12 @@ class RecordingService : LifecycleService() {
         lifecycleScope.launch {
             while (currentRecordingId != null) {
                 delay(1000)
-                val duration = System.currentTimeMillis() - recordingStartTime
+                val currentPausedTime = if (isPaused) {
+                    totalPausedTime + (System.currentTimeMillis() - pauseStartTime)
+                } else {
+                    totalPausedTime
+                }
+                val duration = System.currentTimeMillis() - recordingStartTime - currentPausedTime
                 val minutes = (duration / 1000 / 60).toInt()
                 val seconds = (duration / 1000 % 60).toInt()
                 val timeString = String.format("%02d:%02d", minutes, seconds)
@@ -352,13 +428,18 @@ class RecordingService : LifecycleService() {
 
     fun getRecordingDuration(): Long {
         return if (currentRecordingId != null) {
-            System.currentTimeMillis() - recordingStartTime - totalPausedTime
+            val currentPausedTime = if (isPaused) {
+                totalPausedTime + (System.currentTimeMillis() - pauseStartTime)
+            } else {
+                totalPausedTime
+            }
+            System.currentTimeMillis() - recordingStartTime - currentPausedTime
         } else {
             0
         }
     }
 
-    fun pauseRecording() {
+    private fun pauseRecording() {
         if (!isRecording() || isPaused) {
             return
         }
@@ -366,15 +447,22 @@ class RecordingService : LifecycleService() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 mediaRecorder?.pause()
+                isPaused = true
+                pauseStartTime = System.currentTimeMillis()
+
+                // Update notification immediately
+                val duration = System.currentTimeMillis() - recordingStartTime - totalPausedTime
+                val minutes = (duration / 1000 / 60).toInt()
+                val seconds = (duration / 1000 % 60).toInt()
+                val timeString = String.format("%02d:%02d", minutes, seconds)
+                notificationManager.notify(NOTIFICATION_ID, createNotification(timeString))
             }
-            isPaused = true
-            pauseStartTime = System.currentTimeMillis()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    fun resumeRecording() {
+    private fun resumeRecording() {
         if (!isRecording() || !isPaused) {
             return
         }
@@ -382,13 +470,20 @@ class RecordingService : LifecycleService() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 mediaRecorder?.resume()
+                totalPausedTime += System.currentTimeMillis() - pauseStartTime
+                isPaused = false
+
+                // Update notification immediately
+                val duration = System.currentTimeMillis() - recordingStartTime - totalPausedTime
+                val minutes = (duration / 1000 / 60).toInt()
+                val seconds = (duration / 1000 % 60).toInt()
+                val timeString = String.format("%02d:%02d", minutes, seconds)
+                notificationManager.notify(NOTIFICATION_ID, createNotification(timeString))
             }
-            isPaused = false
-            totalPausedTime += System.currentTimeMillis() - pauseStartTime
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    fun isPaused(): Boolean = isPaused
+    fun isPaused(): Boolean = this.isPaused
 }

@@ -39,6 +39,10 @@ class RecordingsAdapter(
             val dateFormat = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.US)
             binding.recordingDate.text = dateFormat.format(Date(recording.startTime))
 
+            // Patient and healthcare professional info
+            binding.patientName.text = "Patient: ${recording.patientName}"
+            binding.healthcareProfessional.text = "Provider: ${recording.healthcareProfessional}"
+
             // Format duration
             val duration = recording.totalDurationMs / 1000
             val hours = duration / 3600

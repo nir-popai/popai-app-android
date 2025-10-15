@@ -21,8 +21,8 @@
             android:gravity="center">
 
             <ImageView
-                android:layout_width="80dp"
-                android:layout_height="80dp"
+                android:layout_width="120dp"
+                android:layout_height="120dp"
                 android:src="@drawable/logo_popai"
                 android:layout_marginBottom="16dp"
                 android:contentDescription="Popai Logo"/>
@@ -33,7 +33,7 @@
                 android:text="POPAI"
                 android:textSize="32sp"
                 android:textStyle="bold"
-                android:textColor="@color/white"
+                android:textColor="@color/text_primary"
                 android:letterSpacing="0.1"/>
 
             <TextView
@@ -41,7 +41,7 @@
                 android:layout_height="wrap_content"
                 android:text="Medical Recording Assistant"
                 android:textSize="14sp"
-                android:textColor="#B4B9FF"
+                android:textColor="@color/text_secondary"
                 android:layout_marginTop="4dp"/>
 
         </LinearLayout>
@@ -171,18 +171,47 @@
 
             </LinearLayout>
 
-            <!-- Recording timer -->
-            <TextView
-                android:id="@+id/recordingTimer"
+            <!-- Recording Animation and Timer Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/recordingCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="00:00:00"
-                android:textSize="32sp"
-                android:textStyle="bold"
-                android:textColor="@color/error"
-                android:gravity="center"
+                android:layout_marginBottom="20dp"
                 android:visibility="gone"
-                android:layout_marginBottom="20dp"/>
+                app:cardElevation="4dp"
+                app:cardCornerRadius="16dp"
+                app:cardBackgroundColor="@color/card_background">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="24dp"
+                    android:gravity="center">
+
+                    <!-- Waveform Animation -->
+                    <ImageView
+                        android:id="@+id/waveformAnimation"
+                        android:layout_width="match_parent"
+                        android:layout_height="60dp"
+                        android:src="@drawable/waveform_animation"
+                        android:layout_marginBottom="16dp"
+                        android:contentDescription="Recording Animation"/>
+
+                    <!-- Recording timer -->
+                    <TextView
+                        android:id="@+id/recordingTimer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="00:00:00"
+                        android:textSize="32sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent"
+                        android:gravity="center"/>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
 
             <!-- Progress indicator -->
             <ProgressBar
@@ -193,19 +222,6 @@
                 style="?android:attr/progressBarStyleHorizontal"
                 android:indeterminate="true"
                 android:layout_marginBottom="20dp"/>
-
-            <!-- Status message (hidden by default) -->
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text=""
-                android:textSize="14sp"
-                android:textColor="@color/text_secondary"
-                android:visibility="gone"
-                android:padding="16dp"
-                android:background="@color/surface"
-                android:layout_marginBottom="12dp"/>
 
         </LinearLayout>
 

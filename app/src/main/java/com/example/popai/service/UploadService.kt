@@ -13,6 +13,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.popai.R
 import com.example.popai.config.EnvironmentConfig
 import com.example.popai.database.*
+import com.example.popai.model.*
 import com.example.popai.s3.S3Config
 import com.example.popai.s3.S3Uploader
 import com.example.popai.s3.UploadResult
@@ -52,7 +53,15 @@ class UploadService : LifecycleService() {
 
         val recordingId = intent?.getStringExtra("recording_id")
         if (recordingId != null) {
-            startForeground(NOTIFICATION_ID, createNotification("Preparing upload..."))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification("Preparing upload..."),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification("Preparing upload..."))
+            }
             uploadRecording(recordingId)
         }
 
@@ -102,9 +111,12 @@ class UploadService : LifecycleService() {
             try {
                 val recording = database.recordingDao().getRecordingById(recordingId)
                 if (recording == null) {
+                    broadcastLog("Recording not found: $recordingId")
                     stopSelf()
                     return@launch
                 }
+
+                broadcastLog("Starting upload for recording: ${recording.patientName}")
 
                 // Update recording status
                 database.recordingDao().updateRecording(
@@ -113,12 +125,15 @@ class UploadService : LifecycleService() {
 
                 // Get all chunks
                 val chunks = database.chunkDao().getChunksForRecordingSync(recordingId)
+                broadcastLog("Found ${chunks.size} chunks to upload")
+
                 var uploadedCount = 0
                 var failedCount = 0
 
                 for ((index, chunk) in chunks.withIndex()) {
                     if (chunk.uploadStatus == UploadStatus.UPLOADED) {
                         uploadedCount++
+                        broadcastLog("Chunk ${index + 1} already uploaded, skipping")
                         continue
                     }
 
@@ -127,12 +142,15 @@ class UploadService : LifecycleService() {
                         NOTIFICATION_ID,
                         createNotification("Uploading chunk $progress")
                     )
+                    broadcastLog("Uploading chunk $progress...")
 
                     val success = uploadChunk(chunk)
                     if (success) {
                         uploadedCount++
+                        broadcastLog("✓ Chunk ${index + 1} uploaded successfully")
                     } else {
                         failedCount++
+                        broadcastLog("✗ Chunk ${index + 1} failed to upload")
                     }
                 }
 
@@ -143,21 +161,70 @@ class UploadService : LifecycleService() {
                     else -> RecordingStatus.PARTIAL
                 }
 
+                val errorMessage = when (finalStatus) {
+                    RecordingStatus.FAILED -> "All chunks failed to upload"
+                    RecordingStatus.PARTIAL -> "Some chunks failed to upload"
+                    else -> null
+                }
+
                 database.recordingDao().updateRecording(
                     recording.copy(
                         status = finalStatus,
                         uploadedChunks = uploadedCount,
-                        failedChunks = failedCount
+                        failedChunks = failedCount,
+                        errorMessage = errorMessage
                     )
                 )
 
+                broadcastLog("Upload complete: $uploadedCount succeeded, $failedCount failed (Status: $finalStatus)")
+
+                // Generate and upload manifest if all chunks uploaded successfully
+                if (finalStatus == RecordingStatus.UPLOADED) {
+                    broadcastLog("Generating manifest file...")
+                    // Re-query chunks from database to get updated upload status
+                    val updatedChunks = database.chunkDao().getChunksForRecordingSync(recordingId)
+                    broadcastLog("Re-queried ${updatedChunks.size} chunks from database")
+                    updatedChunks.forEachIndexed { index, chunk ->
+                        broadcastLog("  Chunk $index: status=${chunk.uploadStatus}, fileSize=${chunk.fileSize}, s3Key=${chunk.s3Key}")
+                    }
+                    val manifestSuccess = uploadManifest(recording, updatedChunks)
+                    if (manifestSuccess) {
+                        broadcastLog("✓ Manifest file uploaded successfully")
+                    } else {
+                        broadcastLog("✗ Failed to upload manifest file")
+                    }
+                }
+
             } catch (e: Exception) {
                 e.printStackTrace()
+                broadcastLog("Upload error: ${e.message}")
+
+                // Update recording status to FAILED on exception
+                try {
+                    val recording = database.recordingDao().getRecordingById(recordingId)
+                    recording?.let {
+                        database.recordingDao().updateRecording(
+                            it.copy(
+                                status = RecordingStatus.FAILED,
+                                errorMessage = "Upload service error: ${e.message}"
+                            )
+                        )
+                    }
+                } catch (dbError: Exception) {
+                    dbError.printStackTrace()
+                }
             } finally {
                 stopForeground(true)
                 stopSelf()
             }
         }
+    }
+
+    private fun broadcastLog(message: String) {
+        val intent = Intent("com.example.popai.UPLOAD_LOG").apply {
+            putExtra("log_message", message)
+        }
+        sendBroadcast(intent)
     }
 
     private suspend fun uploadChunk(chunk: ChunkEntity): Boolean = withContext(Dispatchers.IO) {
@@ -167,8 +234,10 @@ class UploadService : LifecycleService() {
                 chunk.copy(uploadStatus = UploadStatus.UPLOADING)
             )
 
-            val file = File(chunk.encryptedFilePath)
+            // Upload raw file, not encrypted
+            val file = File(chunk.localFilePath)
             if (!file.exists()) {
+                broadcastLog("  Error: File not found at ${chunk.localFilePath}")
                 database.chunkDao().updateChunk(
                     chunk.copy(
                         uploadStatus = UploadStatus.FAILED,
@@ -179,16 +248,31 @@ class UploadService : LifecycleService() {
                 return@withContext false
             }
 
-            val s3Key = "medical-recordings/${chunk.recordingId}/chunk_${chunk.chunkIndex}.encrypted"
+            val fileSize = file.length()
+            if (fileSize == 0L) {
+                broadcastLog("  Error: File is empty (0 bytes): ${chunk.localFilePath}")
+                database.chunkDao().updateChunk(
+                    chunk.copy(
+                        uploadStatus = UploadStatus.FAILED,
+                        uploadAttempts = chunk.uploadAttempts + 1,
+                        lastError = "File is empty (0 bytes)"
+                    )
+                )
+                return@withContext false
+            }
+
+            val s3Key = "medical-recordings/${chunk.recordingId}/chunk_${chunk.chunkIndex}.m4a"
+            broadcastLog("  Uploading to S3: $s3Key (${fileSize / 1024} KB)")
 
             val result = uploader.uploadFile(
                 file = file,
                 key = s3Key,
-                contentType = "application/octet-stream"
+                contentType = "audio/mp4"
             )
 
             when (result) {
                 is UploadResult.Success -> {
+                    broadcastLog("  S3 URL: ${result.url}")
                     database.chunkDao().updateChunk(
                         chunk.copy(
                             uploadStatus = UploadStatus.UPLOADED,
@@ -197,6 +281,15 @@ class UploadService : LifecycleService() {
                             uploadAttempts = chunk.uploadAttempts + 1
                         )
                     )
+
+                    // Delete raw file after successful upload
+                    try {
+                        file.delete()
+                        broadcastLog("  Raw file deleted after upload")
+                    } catch (e: Exception) {
+                        broadcastLog("  Warning: Could not delete raw file: ${e.message}")
+                    }
+
                     true
                 }
                 is UploadResult.Failure -> {
@@ -206,6 +299,8 @@ class UploadService : LifecycleService() {
                     } else {
                         UploadStatus.PENDING
                     }
+
+                    broadcastLog("  S3 Error: ${result.error.message} (attempt $newAttempts/$MAX_RETRY_ATTEMPTS)")
 
                     database.chunkDao().updateChunk(
                         chunk.copy(
@@ -219,6 +314,7 @@ class UploadService : LifecycleService() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            broadcastLog("  Exception: ${e.message}")
             database.chunkDao().updateChunk(
                 chunk.copy(
                     uploadStatus = UploadStatus.FAILED,
@@ -230,28 +326,108 @@ class UploadService : LifecycleService() {
         }
     }
 
-    suspend fun retryFailedUploads(recordingId: String) {
-        val failedChunks = database.chunkDao().getChunksByRecordingAndStatus(
-            recordingId,
-            UploadStatus.FAILED
-        )
+    private suspend fun uploadManifest(
+        recording: RecordingEntity,
+        chunks: List<ChunkEntity>
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            broadcastLog("uploadManifest: Received ${chunks.size} total chunks")
 
-        // Reset failed chunks to pending if they haven't exceeded max retries
-        failedChunks.forEach { chunk ->
-            if (chunk.uploadAttempts < MAX_RETRY_ATTEMPTS) {
-                database.chunkDao().updateChunk(
-                    chunk.copy(
-                        uploadStatus = UploadStatus.PENDING,
-                        lastError = null
-                    )
-                )
+            // Debug: log all chunk statuses
+            chunks.forEach { chunk ->
+                broadcastLog("  Chunk ${chunk.chunkIndex}: status=${chunk.uploadStatus}, fileSize=${chunk.fileSize}, s3Key=${chunk.s3Key}")
             }
-        }
 
-        // Restart upload
-        val intent = Intent(this, UploadService::class.java).apply {
-            putExtra("recording_id", recordingId)
+            // Get only uploaded chunks and sort by index
+            val uploadedChunks = chunks
+                .filter { it.uploadStatus == UploadStatus.UPLOADED }
+                .sortedBy { it.chunkIndex }
+
+            broadcastLog("uploadManifest: Filtered to ${uploadedChunks.size} UPLOADED chunks")
+
+            if (uploadedChunks.isEmpty()) {
+                broadcastLog("ERROR: No uploaded chunks found! Cannot generate manifest.")
+                return@withContext false
+            }
+
+            // Calculate cumulative start times for each chunk
+            var cumulativeTime = 0L
+            val chunkInfoList = uploadedChunks.map { chunk ->
+                val chunkInfo = ChunkInfo(
+                    chunkIndex = chunk.chunkIndex,
+                    durationMs = chunk.durationMs,
+                    s3Key = chunk.s3Key ?: "",
+                    sizeBytes = chunk.fileSize,
+                    startTimeMs = cumulativeTime
+                )
+                broadcastLog("  Adding chunk ${chunk.chunkIndex} to manifest: size=${chunk.fileSize}, duration=${chunk.durationMs}")
+                cumulativeTime += chunk.durationMs
+                chunkInfo
+            }
+
+            // Calculate totals from uploaded chunks
+            val totalSizeBytes = chunkInfoList.sumOf { it.sizeBytes }
+            val totalDurationMs = chunkInfoList.sumOf { it.durationMs }
+
+            // Create manifest
+            val manifest = RecordingManifest(
+                recordingId = recording.id,
+                recordingStartDate = formatTimestamp(recording.startTime),
+                uploadDate = formatTimestamp(System.currentTimeMillis()),
+                metadata = RecordingMetadata(
+                    patientName = recording.patientName,
+                    healthcareProfessional = recording.healthcareProfessional
+                ),
+                chunks = chunkInfoList,
+                summary = RecordingSummary(
+                    totalChunks = chunkInfoList.size,
+                    totalDurationMs = totalDurationMs,
+                    totalSizeBytes = totalSizeBytes,
+                    uploadedChunks = uploadedChunks.size,
+                    failedChunks = chunks.size - uploadedChunks.size
+                )
+            )
+
+            // Convert to JSON
+            val manifestJson = manifest.toJson()
+            broadcastLog("Manifest contains ${chunkInfoList.size} chunks")
+            broadcastLog("Manifest JSON size: ${manifestJson.length} bytes")
+
+            // Debug: Print the actual manifest JSON
+            android.util.Log.d("UploadService", "Manifest JSON:\n$manifestJson")
+
+            // Write to temporary file
+            val manifestFile = File(cacheDir, "manifest_${recording.id}.json")
+            manifestFile.writeText(manifestJson)
+
+            // Upload to S3
+            val s3Key = "medical-recordings/${recording.id}/manifest.json"
+            broadcastLog("Uploading manifest to S3: $s3Key")
+
+            val result = uploader.uploadFile(
+                file = manifestFile,
+                key = s3Key,
+                contentType = "application/json"
+            )
+
+            // Clean up temp file
+            manifestFile.delete()
+
+            when (result) {
+                is UploadResult.Success -> {
+                    broadcastLog("Manifest uploaded: ${result.url}")
+                    true
+                }
+                is UploadResult.Failure -> {
+                    broadcastLog("Manifest upload failed: ${result.error.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            broadcastLog("Manifest generation error: ${e.message}")
+            false
         }
-        startService(intent)
     }
+
 }

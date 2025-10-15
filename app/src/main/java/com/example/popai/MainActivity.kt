@@ -1,11 +1,14 @@
 package com.example.popai
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.graphics.drawable.Animatable
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -30,6 +33,17 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
+        const val UPLOAD_LOG_ACTION = "com.example.popai.UPLOAD_LOG"
+        const val EXTRA_LOG_MESSAGE = "log_message"
+    }
+
+    private val uploadLogReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val message = intent?.getStringExtra(EXTRA_LOG_MESSAGE)
+            message?.let {
+                appendLog(it)
+            }
+        }
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -38,6 +52,11 @@ class MainActivity : AppCompatActivity() {
             recordingService = binder.getService()
             isServiceBound = true
             updateUIState()
+
+            // If recording is in progress, start timer update
+            if (recordingService?.isRecording() == true) {
+                startTimerUpdate()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -57,6 +76,9 @@ class MainActivity : AppCompatActivity() {
         // Request permissions
         checkAndRequestPermissions()
 
+        // Check if recording service is already running
+        bindToExistingService()
+
         // Set up buttons
         binding.recordButton.setOnClickListener {
             showPatientInfoDialog()
@@ -72,6 +94,37 @@ class MainActivity : AppCompatActivity() {
 
         binding.historyButton.setOnClickListener {
             openRecordingsHistory()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-bind to service when app comes to foreground
+        bindToExistingService()
+
+        // Register broadcast receiver
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(uploadLogReceiver, IntentFilter(UPLOAD_LOG_ACTION), RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(uploadLogReceiver, IntentFilter(UPLOAD_LOG_ACTION))
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try {
+            unregisterReceiver(uploadLogReceiver)
+        } catch (e: Exception) {
+            // Receiver not registered
+        }
+    }
+
+    private fun bindToExistingService() {
+        val intent = Intent(this, RecordingService::class.java)
+        try {
+            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -224,23 +277,55 @@ class MainActivity : AppCompatActivity() {
             action = RecordingService.ACTION_STOP_RECORDING
         }
         startService(intent)
-        updateUIState()
+
+        // Wait a moment for the service to process the stop, then update UI
+        lifecycleScope.launch {
+            delay(500)
+            updateUIState()
+        }
     }
 
     private fun togglePause() {
         val service = recordingService ?: return
+
         if (service.isPaused()) {
+            // Currently paused, so resume
             val intent = Intent(this, RecordingService::class.java).apply {
                 action = RecordingService.ACTION_RESUME_RECORDING
             }
             startService(intent)
-            binding.pauseButton.text = "Pause"
+
+            // Update UI after a brief delay to allow service to process
+            lifecycleScope.launch {
+                delay(300)
+                updateUIState() // Use updateUIState to sync properly
+            }
         } else {
+            // Currently recording, so pause
             val intent = Intent(this, RecordingService::class.java).apply {
                 action = RecordingService.ACTION_PAUSE_RECORDING
             }
             startService(intent)
-            binding.pauseButton.text = "Resume"
+
+            // Update UI after a brief delay to allow service to process
+            lifecycleScope.launch {
+                delay(300)
+                updateUIState() // Use updateUIState to sync properly
+            }
+        }
+    }
+
+    private fun startWaveformAnimation() {
+        val drawable = binding.waveformAnimation.drawable
+        if (drawable is Animatable) {
+            drawable.start()
+        }
+    }
+
+    private fun stopWaveformAnimation() {
+        val drawable = binding.waveformAnimation.drawable
+        if (drawable is Animatable) {
+            drawable.stop()
         }
     }
 
@@ -249,14 +334,22 @@ class MainActivity : AppCompatActivity() {
         if (isRecording) {
             binding.initialControls.visibility = View.GONE
             binding.recordingControls.visibility = View.VISIBLE
-            binding.recordingTimer.visibility = View.VISIBLE
+            binding.recordingCard.visibility = View.VISIBLE
 
             val isPaused = recordingService?.isPaused() ?: false
             binding.pauseButton.text = if (isPaused) "Resume" else "Pause"
+
+            // Start animation if not paused
+            if (!isPaused) {
+                startWaveformAnimation()
+            } else {
+                stopWaveformAnimation()
+            }
         } else {
             binding.initialControls.visibility = View.VISIBLE
             binding.recordingControls.visibility = View.GONE
-            binding.recordingTimer.visibility = View.GONE
+            binding.recordingCard.visibility = View.GONE
+            stopWaveformAnimation()
         }
     }
 
@@ -280,14 +373,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun showStatusMessage(message: String, isError: Boolean) {
         runOnUiThread {
-            binding.statusText.text = message
-            binding.statusText.visibility = View.VISIBLE
-            binding.statusText.setTextColor(getColor(if (isError) R.color.error else R.color.success))
-
-            // Hide message after 5 seconds
-            binding.statusText.postDelayed({
-                binding.statusText.visibility = View.GONE
-            }, 5000)
+            // Show a toast message instead of using statusText
+            android.widget.Toast.makeText(
+                this,
+                message,
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
+    }
+
+    private fun appendLog(message: String) {
+        // Upload logs removed - no longer needed
     }
 }

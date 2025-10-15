@@ -14,7 +14,14 @@
       "Bash(./gradlew:*)",
       "Bash(unzip:*)",
       "Bash(jar tf:*)",
-      "Read(//c/Users/nirma/AndroidStudioProjects/**)"
+      "Read(//c/Users/nirma/AndroidStudioProjects/**)",
+      "Bash(adb logcat:*)",
+      "Bash(copy:*)",
+      "Bash(cp:*)",
+      "Bash(findstr:*)",
+      "Bash(rm:*)",
+      "Read(//c/Users/nirma/OneDrive/Documents/popai/**)",
+      "WebFetch(domain:www.popai.health)"
     ],
     "deny": [],
     "ask": []
