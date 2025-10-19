@@ -27,7 +27,9 @@
       "Bash(./gradlew.bat assembleDebug)",
       "Bash(./gradlew.bat assembleRelease)",
       "Bash(git add popai-release.apk)",
-      "Bash(git add app/src/main/res/values/strings.xml)"
+      "Bash(git add app/src/main/res/values/strings.xml)",
+      "Bash(git rm popai-release.apk)",
+      "Bash(git add popai-release.apk app/src/main/res/drawable/ic_launcher_foreground.xml)"
     ],
     "deny": [],
     "ask": []

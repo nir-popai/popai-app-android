@@ -6,8 +6,8 @@
 
     <!-- Popai Waveform Logo for App Icon - scaled and centered -->
     <group
-        android:translateX="33"
-        android:translateY="37"
+        android:translateX="31"
+        android:translateY="24"
         android:scaleX="2.2"
         android:scaleY="2.2">
 
