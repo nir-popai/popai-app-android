@@ -17,9 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.example.popai.config.EnvironmentConfig
 import com.example.popai.databinding.ActivityMainBinding
-import com.example.popai.s3.S3Config
 import com.example.popai.service.RecordingService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -27,7 +25,6 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private var configLoaded = false
     private var recordingService: RecordingService? = null
     private var isServiceBound = false
 
@@ -70,14 +67,16 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Initialize configuration
-        initializeConfig()
-
         // Request permissions
         checkAndRequestPermissions()
 
         // Check if recording service is already running
         bindToExistingService()
+
+        // Show ready status
+        binding.configStatusText.text = "Ready to record medical conversations"
+        binding.configStatusText.setTextColor(getColor(R.color.success))
+        binding.recordButton.isEnabled = true
 
         // Set up buttons
         binding.recordButton.setOnClickListener {
@@ -136,54 +135,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initializeConfig() {
-        lifecycleScope.launch {
-            try {
-                // Load .env from app assets (bundled with APK)
-                val loaded = EnvironmentConfig.load(applicationContext)
-
-                if (!loaded) {
-                    showConfigError("Configuration Error", "Unable to load credentials. Please contact support.")
-                    return@launch
-                }
-
-                // Check if credentials are present
-                if (!EnvironmentConfig.hasRequiredCredentials()) {
-                    showConfigError("Configuration Error", "Missing required credentials. Please contact support.")
-                    return@launch
-                }
-
-                // Create S3 config
-                val config = S3Config(
-                    bucketName = EnvironmentConfig.s3BucketName,
-                    region = EnvironmentConfig.awsRegion,
-                    accessKey = EnvironmentConfig.awsAccessKeyId,
-                    secretKey = EnvironmentConfig.awsSecretAccessKey,
-                    sessionToken = EnvironmentConfig.awsSessionToken
-                )
-
-                // Show success
-                showConfigSuccess()
-                configLoaded = true
-                binding.recordButton.isEnabled = true
-
-            } catch (e: Exception) {
-                showConfigError("Initialization Error", "Failed to initialize. Please try again.")
-                e.printStackTrace()
-            }
-        }
-    }
-
-    private fun showConfigSuccess() {
-        binding.configStatusText.text = "Ready to record medical conversations"
-        binding.configStatusText.setTextColor(getColor(R.color.success))
-    }
-
-    private fun showConfigError(title: String, message: String) {
-        binding.configStatusText.text = "$title: $message"
-        binding.configStatusText.setTextColor(getColor(R.color.error))
-        binding.recordButton.isEnabled = false
-    }
 
     private fun checkAndRequestPermissions() {
         val permissions = mutableListOf<String>()
@@ -273,15 +224,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopRecording() {
+        // Immediately disable buttons and show feedback
+        binding.stopButton.isEnabled = false
+        binding.pauseButton.isEnabled = false
+        binding.stopButton.text = "Stopping..."
+
         val intent = Intent(this, RecordingService::class.java).apply {
             action = RecordingService.ACTION_STOP_RECORDING
         }
         startService(intent)
 
-        // Wait a moment for the service to process the stop, then update UI
+        // Poll UI state to update when stopping is complete
         lifecycleScope.launch {
-            delay(500)
-            updateUIState()
+            var attempts = 0
+            while (attempts < 20) { // Try for up to 10 seconds
+                delay(500)
+                val isStopping = recordingService?.isStopping() ?: false
+                if (!isStopping) {
+                    // Stopping is complete
+                    updateUIState()
+                    break
+                }
+                attempts++
+            }
+            // Force update UI after timeout
+            if (attempts >= 20) {
+                updateUIState()
+            }
         }
     }
 
@@ -331,6 +300,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUIState() {
         val isRecording = recordingService?.isRecording() ?: false
+        val isStopping = recordingService?.isStopping() ?: false
+
         if (isRecording) {
             binding.initialControls.visibility = View.GONE
             binding.recordingControls.visibility = View.VISIBLE
@@ -339,8 +310,13 @@ class MainActivity : AppCompatActivity() {
             val isPaused = recordingService?.isPaused() ?: false
             binding.pauseButton.text = if (isPaused) "Resume" else "Pause"
 
-            // Start animation if not paused
-            if (!isPaused) {
+            // Enable/disable buttons based on stopping state
+            binding.stopButton.isEnabled = !isStopping
+            binding.pauseButton.isEnabled = !isStopping
+            binding.stopButton.text = if (isStopping) "Stopping..." else "Stop"
+
+            // Start animation if not paused and not stopping
+            if (!isPaused && !isStopping) {
                 startWaveformAnimation()
             } else {
                 stopWaveformAnimation()
@@ -350,6 +326,11 @@ class MainActivity : AppCompatActivity() {
             binding.recordingControls.visibility = View.GONE
             binding.recordingCard.visibility = View.GONE
             stopWaveformAnimation()
+
+            // Reset button states
+            binding.stopButton.isEnabled = true
+            binding.pauseButton.isEnabled = true
+            binding.stopButton.text = "Stop"
         }
     }
 

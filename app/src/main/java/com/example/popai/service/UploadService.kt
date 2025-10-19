@@ -11,12 +11,13 @@ import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.example.popai.R
-import com.example.popai.config.EnvironmentConfig
+import com.example.popai.api.PresignedUrl
+import com.example.popai.api.PresignedUrlResult
+import com.example.popai.api.PresignedUrlService
+import com.example.popai.api.UploadProgress
+import com.example.popai.api.UploadResult
 import com.example.popai.database.*
 import com.example.popai.model.*
-import com.example.popai.s3.S3Config
-import com.example.popai.s3.S3Uploader
-import com.example.popai.s3.UploadResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -25,7 +26,7 @@ import java.io.File
 class UploadService : LifecycleService() {
 
     private lateinit var database: AppDatabase
-    private lateinit var uploader: S3Uploader
+    private val presignedUrlService = PresignedUrlService()
     private lateinit var notificationManager: NotificationManager
 
     companion object {
@@ -40,7 +41,6 @@ class UploadService : LifecycleService() {
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         createNotificationChannel()
-        initializeUploader()
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -95,21 +95,6 @@ class UploadService : LifecycleService() {
             }
             .build()
 
-    private fun initializeUploader() {
-        try {
-            EnvironmentConfig.load(applicationContext)
-            val config = S3Config(
-                bucketName = EnvironmentConfig.s3BucketName,
-                region = EnvironmentConfig.awsRegion,
-                accessKey = EnvironmentConfig.awsAccessKeyId,
-                secretKey = EnvironmentConfig.awsSecretAccessKey,
-                sessionToken = EnvironmentConfig.awsSessionToken
-            )
-            uploader = S3Uploader(config)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
 
     private fun uploadRecording(recordingId: String) {
         lifecycleScope.launch {
@@ -131,6 +116,34 @@ class UploadService : LifecycleService() {
                 val totalBytes = chunks.sumOf { it.fileSize }
                 val totalMB = totalBytes / (1024.0 * 1024.0)
                 broadcastLog("Total size: %.2f MB".format(totalMB))
+
+                // Request presigned URLs for all files (chunks + manifest)
+                broadcastLog("Requesting presigned URLs from backend...")
+                val presignedUrlResult = presignedUrlService.requestPresignedUrls(
+                    recordingId = recordingId,
+                    fileCount = chunks.size + 1 // +1 for manifest
+                )
+
+                when (presignedUrlResult) {
+                    is PresignedUrlResult.Failure -> {
+                        broadcastLog("✗ Failed to get presigned URLs: ${presignedUrlResult.error}")
+                        database.recordingDao().updateRecording(
+                            recording.copy(
+                                status = RecordingStatus.FAILED,
+                                errorMessage = "Failed to get upload URLs: ${presignedUrlResult.error}"
+                            )
+                        )
+                        stopSelf()
+                        return@launch
+                    }
+                    is PresignedUrlResult.Success -> {
+                        broadcastLog("✓ Received ${presignedUrlResult.response.presignedUrls.size} presigned URLs")
+                    }
+                }
+
+                // Create a map of filename -> presigned URL for easy lookup
+                val urlMap = (presignedUrlResult as PresignedUrlResult.Success).response.presignedUrls
+                    .associateBy { it.file }
 
                 // Update recording status with total bytes
                 database.recordingDao().updateRecording(
@@ -154,6 +167,15 @@ class UploadService : LifecycleService() {
                         continue
                     }
 
+                    // Get presigned URL for this chunk
+                    val chunkFileName = "chunk_${chunk.chunkIndex}.m4a"
+                    val presignedUrl = urlMap[chunkFileName]
+                    if (presignedUrl == null) {
+                        broadcastLog("✗ No presigned URL for $chunkFileName")
+                        failedCount++
+                        continue
+                    }
+
                     val progress = "${index + 1}/${chunks.size}"
                     notificationManager.notify(
                         NOTIFICATION_ID,
@@ -161,7 +183,7 @@ class UploadService : LifecycleService() {
                     )
                     broadcastLog("Uploading chunk $progress...")
 
-                    val success = uploadChunk(chunk, recordingId, totalUploadedBytes)
+                    val success = uploadChunk(chunk, recordingId, totalUploadedBytes, presignedUrl)
                     if (success) {
                         uploadedCount++
                         totalUploadedBytes += chunk.fileSize
@@ -196,7 +218,7 @@ class UploadService : LifecycleService() {
 
                 broadcastLog("Upload complete: $uploadedCount succeeded, $failedCount failed (Status: $finalStatus)")
 
-                // Generate and upload manifest if all chunks uploaded successfully
+                // Generate and upload manifest LAST if all chunks uploaded successfully
                 if (finalStatus == RecordingStatus.UPLOADED) {
                     broadcastLog("Generating manifest file...")
                     // Re-query chunks from database to get updated upload status
@@ -205,11 +227,18 @@ class UploadService : LifecycleService() {
                     updatedChunks.forEachIndexed { index, chunk ->
                         broadcastLog("  Chunk $index: status=${chunk.uploadStatus}, fileSize=${chunk.fileSize}, s3Key=${chunk.s3Key}")
                     }
-                    val manifestSuccess = uploadManifest(recording, updatedChunks)
-                    if (manifestSuccess) {
-                        broadcastLog("✓ Manifest file uploaded successfully")
+
+                    // Get presigned URL for manifest
+                    val manifestUrl = urlMap["manifest.json"]
+                    if (manifestUrl != null) {
+                        val manifestSuccess = uploadManifest(recording, updatedChunks, manifestUrl)
+                        if (manifestSuccess) {
+                            broadcastLog("✓ Manifest file uploaded successfully")
+                        } else {
+                            broadcastLog("✗ Failed to upload manifest file")
+                        }
                     } else {
-                        broadcastLog("✗ Failed to upload manifest file")
+                        broadcastLog("✗ No presigned URL for manifest.json")
                     }
                 }
 
@@ -248,7 +277,8 @@ class UploadService : LifecycleService() {
     private suspend fun uploadChunk(
         chunk: ChunkEntity,
         recordingId: String,
-        bytesUploadedSoFar: Long
+        bytesUploadedSoFar: Long,
+        presignedUrl: PresignedUrl
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             // Update status to uploading
@@ -283,14 +313,13 @@ class UploadService : LifecycleService() {
                 return@withContext false
             }
 
-            val s3Key = "medical-recordings/${chunk.recordingId}/chunk_${chunk.chunkIndex}.m4a"
             val fileSizeKB = fileSize / 1024
             val fileSizeMB = fileSize / (1024.0 * 1024.0)
-            broadcastLog("  Uploading to S3: $s3Key (${fileSizeKB} KB)")
+            broadcastLog("  Uploading to S3: ${presignedUrl.key} (${fileSizeKB} KB)")
 
-            val result = uploader.uploadFile(
+            val result = presignedUrlService.uploadFile(
                 file = file,
-                key = s3Key,
+                presignedUrl = presignedUrl.url,
                 contentType = "audio/mp4",
                 onProgress = { progress ->
                     // Calculate total progress across all chunks
@@ -354,13 +383,13 @@ class UploadService : LifecycleService() {
                         UploadStatus.PENDING
                     }
 
-                    broadcastLog("  S3 Error: ${result.error.message} (attempt $newAttempts/$MAX_RETRY_ATTEMPTS)")
+                    broadcastLog("  Upload Error: ${result.error} (attempt $newAttempts/$MAX_RETRY_ATTEMPTS)")
 
                     database.chunkDao().updateChunk(
                         chunk.copy(
                             uploadStatus = status,
                             uploadAttempts = newAttempts,
-                            lastError = result.error.message
+                            lastError = result.error
                         )
                     )
                     false
@@ -382,7 +411,8 @@ class UploadService : LifecycleService() {
 
     private suspend fun uploadManifest(
         recording: RecordingEntity,
-        chunks: List<ChunkEntity>
+        chunks: List<ChunkEntity>,
+        presignedUrl: PresignedUrl
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             broadcastLog("uploadManifest: Received ${chunks.size} total chunks")
@@ -454,13 +484,12 @@ class UploadService : LifecycleService() {
             val manifestFile = File(cacheDir, "manifest_${recording.id}.json")
             manifestFile.writeText(manifestJson)
 
-            // Upload to S3
-            val s3Key = "medical-recordings/${recording.id}/manifest.json"
-            broadcastLog("Uploading manifest to S3: $s3Key")
+            // Upload to S3 using presigned URL
+            broadcastLog("Uploading manifest to S3: ${presignedUrl.key}")
 
-            val result = uploader.uploadFile(
+            val result = presignedUrlService.uploadFile(
                 file = manifestFile,
-                key = s3Key,
+                presignedUrl = presignedUrl.url,
                 contentType = "application/json",
                 onProgress = { progress ->
                     val progressMessage = String.format(
@@ -485,7 +514,7 @@ class UploadService : LifecycleService() {
                     true
                 }
                 is UploadResult.Failure -> {
-                    broadcastLog("Manifest upload failed: ${result.error.message}")
+                    broadcastLog("Manifest upload failed: ${result.error}")
                     false
                 }
             }

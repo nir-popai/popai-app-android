@@ -45,10 +45,6 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
 
-    // AWS S3 SDK
-    implementation("com.amazonaws:aws-android-sdk-s3:2.77.0")
-    implementation("com.amazonaws:aws-android-sdk-core:2.77.0")
-
     // Coroutines for async operations
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 

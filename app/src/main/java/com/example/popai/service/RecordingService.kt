@@ -39,6 +39,7 @@ class RecordingService : LifecycleService() {
     private var isPaused = false
     private var pauseStartTime: Long = 0
     private var totalPausedTime: Long = 0
+    private var isStopping = false
 
     private lateinit var database: AppDatabase
     private lateinit var encryptionManager: EncryptionManager
@@ -47,7 +48,7 @@ class RecordingService : LifecycleService() {
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "recording_channel"
-        private const val CHUNK_DURATION_MS = 10 * 60 * 1000L // 10 minutes
+        private const val CHUNK_DURATION_MS = 5 * 60 * 1000L // 5 minutes (smaller chunks = faster, more reliable uploads)
 
         const val ACTION_START_RECORDING = "start_recording"
         const val ACTION_STOP_RECORDING = "stop_recording"
@@ -191,50 +192,62 @@ class RecordingService : LifecycleService() {
     }
 
     fun stopRecording() {
+        // Prevent multiple stop calls
+        if (isStopping) {
+            android.util.Log.d("RecordingService", "Stop already in progress, ignoring duplicate stop request")
+            return
+        }
+        isStopping = true
+
         chunkTimer?.cancel()
 
         lifecycleScope.launch {
-            // Stop and encrypt current chunk
             try {
-                mediaRecorder?.apply {
-                    stop()
-                    release()
-                }
-                mediaRecorder = null
+                // Stop and encrypt current chunk
+                try {
+                    mediaRecorder?.apply {
+                        stop()
+                        release()
+                    }
+                    mediaRecorder = null
 
-                // Give MediaRecorder time to finalize the file
-                delay(500)
+                    // Give MediaRecorder time to finalize the file
+                    delay(500)
 
-                encryptCurrentChunk()
-                currentChunkIndex++
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-
-            currentRecordingId?.let { recordingId ->
-                val recording = database.recordingDao().getRecordingById(recordingId)
-                recording?.let {
-                    val updatedRecording = it.copy(
-                        endTime = System.currentTimeMillis(),
-                        totalDurationMs = System.currentTimeMillis() - it.startTime - totalPausedTime,
-                        pausedDurationMs = totalPausedTime,
-                        status = RecordingStatus.COMPLETED,
-                        chunkCount = currentChunkIndex
-                    )
-                    database.recordingDao().updateRecording(updatedRecording)
+                    encryptCurrentChunk()
+                    currentChunkIndex++
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
 
-                // Start upload process
-                startUploadService(recordingId)
-            }
+                currentRecordingId?.let { recordingId ->
+                    val recording = database.recordingDao().getRecordingById(recordingId)
+                    recording?.let {
+                        val updatedRecording = it.copy(
+                            endTime = System.currentTimeMillis(),
+                            totalDurationMs = System.currentTimeMillis() - it.startTime - totalPausedTime,
+                            pausedDurationMs = totalPausedTime,
+                            status = RecordingStatus.COMPLETED,
+                            chunkCount = currentChunkIndex
+                        )
+                        database.recordingDao().updateRecording(updatedRecording)
+                    }
 
-            currentRecordingId = null
-            isPaused = false
-            totalPausedTime = 0
+                    // Start upload process
+                    startUploadService(recordingId)
+                }
 
-            withContext(Dispatchers.Main) {
-                stopForeground(true)
-                stopSelf()
+                currentRecordingId = null
+                isPaused = false
+                totalPausedTime = 0
+
+            } finally {
+                // Always reset stopping flag and stop service
+                isStopping = false
+                withContext(Dispatchers.Main) {
+                    stopForeground(true)
+                    stopSelf()
+                }
             }
         }
     }
@@ -422,7 +435,9 @@ class RecordingService : LifecycleService() {
         startService(intent)
     }
 
-    fun isRecording(): Boolean = currentRecordingId != null
+    fun isRecording(): Boolean = currentRecordingId != null && !isStopping
+
+    fun isStopping(): Boolean = isStopping
 
     fun getCurrentRecordingId(): String? = currentRecordingId
 
