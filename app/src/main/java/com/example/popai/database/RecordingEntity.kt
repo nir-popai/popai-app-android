@@ -18,7 +18,10 @@ data class RecordingEntity(
     val chunkCount: Int,
     val uploadedChunks: Int,
     val failedChunks: Int,
-    val errorMessage: String?
+    val errorMessage: String?,
+    val totalBytes: Long = 0L,
+    val uploadedBytes: Long = 0L,
+    val currentChunkProgress: Int = 0
 )
 
 enum class RecordingStatus {

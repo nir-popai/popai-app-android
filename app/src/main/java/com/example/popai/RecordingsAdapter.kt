@@ -72,6 +72,18 @@ class RecordingsAdapter(
                     binding.uploadProgress.text = "Uploaded: ${recording.uploadedChunks}/${recording.chunkCount}"
                     binding.failedChunks.visibility = if (recording.failedChunks > 0) View.VISIBLE else View.GONE
                     binding.failedChunks.text = "Failed: ${recording.failedChunks}"
+
+                    // Show bytes uploaded
+                    val uploadedMB = recording.uploadedBytes / (1024.0 * 1024.0)
+                    val totalMB = recording.totalBytes / (1024.0 * 1024.0)
+                    binding.uploadBytes.text = String.format("%.2f MB / %.2f MB", uploadedMB, totalMB)
+
+                    // Show progress bar
+                    val overallProgress = if (recording.totalBytes > 0) {
+                        ((recording.uploadedBytes * 100) / recording.totalBytes).toInt()
+                    } else 0
+                    binding.uploadProgressBar.progress = overallProgress
+
                     binding.errorMessage.visibility = View.GONE
                     binding.retryButton.visibility = View.GONE
                 }
@@ -81,6 +93,18 @@ class RecordingsAdapter(
                     binding.uploadProgress.text = "Uploaded: ${recording.uploadedChunks}/${recording.chunkCount}"
                     binding.failedChunks.visibility = View.VISIBLE
                     binding.failedChunks.text = "Failed: ${recording.failedChunks}"
+
+                    // Show bytes uploaded
+                    val uploadedMB = recording.uploadedBytes / (1024.0 * 1024.0)
+                    val totalMB = recording.totalBytes / (1024.0 * 1024.0)
+                    binding.uploadBytes.text = String.format("%.2f MB / %.2f MB", uploadedMB, totalMB)
+
+                    // Show progress bar
+                    val overallProgress = if (recording.totalBytes > 0) {
+                        ((recording.uploadedBytes * 100) / recording.totalBytes).toInt()
+                    } else 0
+                    binding.uploadProgressBar.progress = overallProgress
+
                     binding.errorMessage.visibility = if (recording.errorMessage != null) View.VISIBLE else View.GONE
                     binding.errorMessage.text = recording.errorMessage
                     binding.retryButton.visibility = View.VISIBLE
@@ -91,6 +115,18 @@ class RecordingsAdapter(
                     binding.uploadProgress.text = "Uploaded: ${recording.uploadedChunks}/${recording.chunkCount}"
                     binding.failedChunks.visibility = View.VISIBLE
                     binding.failedChunks.text = "Failed: ${recording.failedChunks}"
+
+                    // Show bytes uploaded
+                    val uploadedMB = recording.uploadedBytes / (1024.0 * 1024.0)
+                    val totalMB = recording.totalBytes / (1024.0 * 1024.0)
+                    binding.uploadBytes.text = String.format("%.2f MB / %.2f MB", uploadedMB, totalMB)
+
+                    // Show progress bar
+                    val overallProgress = if (recording.totalBytes > 0) {
+                        ((recording.uploadedBytes * 100) / recording.totalBytes).toInt()
+                    } else 0
+                    binding.uploadProgressBar.progress = overallProgress
+
                     binding.errorMessage.visibility = View.GONE
                     binding.retryButton.visibility = View.VISIBLE
                 }

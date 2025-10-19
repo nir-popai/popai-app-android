@@ -383,6 +383,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun appendLog(message: String) {
-        // Upload logs removed - no longer needed
+        runOnUiThread {
+            // Log to Android logcat for debugging
+            android.util.Log.d("UploadService", message)
+
+            // Optionally show in UI (you can enable/disable this)
+            // android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 }

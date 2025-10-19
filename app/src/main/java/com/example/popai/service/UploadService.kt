@@ -82,12 +82,17 @@ class UploadService : LifecycleService() {
         }
     }
 
-    private fun createNotification(message: String) =
+    private fun createNotification(message: String, progress: Int = -1) =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Uploading recordings")
             .setContentText(message)
             .setSmallIcon(R.drawable.recording_indicator)
             .setOngoing(true)
+            .apply {
+                if (progress >= 0) {
+                    setProgress(100, progress, false)
+                }
+            }
             .build()
 
     private fun initializeUploader() {
@@ -118,21 +123,33 @@ class UploadService : LifecycleService() {
 
                 broadcastLog("Starting upload for recording: ${recording.patientName}")
 
-                // Update recording status
-                database.recordingDao().updateRecording(
-                    recording.copy(status = RecordingStatus.UPLOADING)
-                )
-
                 // Get all chunks
                 val chunks = database.chunkDao().getChunksForRecordingSync(recordingId)
                 broadcastLog("Found ${chunks.size} chunks to upload")
 
+                // Calculate total bytes
+                val totalBytes = chunks.sumOf { it.fileSize }
+                val totalMB = totalBytes / (1024.0 * 1024.0)
+                broadcastLog("Total size: %.2f MB".format(totalMB))
+
+                // Update recording status with total bytes
+                database.recordingDao().updateRecording(
+                    recording.copy(
+                        status = RecordingStatus.UPLOADING,
+                        totalBytes = totalBytes,
+                        uploadedBytes = 0L,
+                        currentChunkProgress = 0
+                    )
+                )
+
                 var uploadedCount = 0
                 var failedCount = 0
+                var totalUploadedBytes = 0L
 
                 for ((index, chunk) in chunks.withIndex()) {
                     if (chunk.uploadStatus == UploadStatus.UPLOADED) {
                         uploadedCount++
+                        totalUploadedBytes += chunk.fileSize
                         broadcastLog("Chunk ${index + 1} already uploaded, skipping")
                         continue
                     }
@@ -144,9 +161,10 @@ class UploadService : LifecycleService() {
                     )
                     broadcastLog("Uploading chunk $progress...")
 
-                    val success = uploadChunk(chunk)
+                    val success = uploadChunk(chunk, recordingId, totalUploadedBytes)
                     if (success) {
                         uploadedCount++
+                        totalUploadedBytes += chunk.fileSize
                         broadcastLog("✓ Chunk ${index + 1} uploaded successfully")
                     } else {
                         failedCount++
@@ -227,7 +245,11 @@ class UploadService : LifecycleService() {
         sendBroadcast(intent)
     }
 
-    private suspend fun uploadChunk(chunk: ChunkEntity): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun uploadChunk(
+        chunk: ChunkEntity,
+        recordingId: String,
+        bytesUploadedSoFar: Long
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
             // Update status to uploading
             database.chunkDao().updateChunk(
@@ -262,12 +284,44 @@ class UploadService : LifecycleService() {
             }
 
             val s3Key = "medical-recordings/${chunk.recordingId}/chunk_${chunk.chunkIndex}.m4a"
-            broadcastLog("  Uploading to S3: $s3Key (${fileSize / 1024} KB)")
+            val fileSizeKB = fileSize / 1024
+            val fileSizeMB = fileSize / (1024.0 * 1024.0)
+            broadcastLog("  Uploading to S3: $s3Key (${fileSizeKB} KB)")
 
             val result = uploader.uploadFile(
                 file = file,
                 key = s3Key,
-                contentType = "audio/mp4"
+                contentType = "audio/mp4",
+                onProgress = { progress ->
+                    // Calculate total progress across all chunks
+                    val currentUploadedBytes = bytesUploadedSoFar + progress.bytesTransferred
+
+                    // Update notification with progress
+                    val progressMessage = String.format(
+                        "Chunk ${chunk.chunkIndex + 1}: %.2f/%.2f MB (%d%%)",
+                        progress.megabytesTransferred,
+                        progress.totalMegabytes,
+                        progress.percentComplete
+                    )
+                    notificationManager.notify(
+                        NOTIFICATION_ID,
+                        createNotification(progressMessage, progress.percentComplete)
+                    )
+                    broadcastLog("  Progress: $progressMessage")
+
+                    // Update recording progress in database
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val recording = database.recordingDao().getRecordingById(recordingId)
+                        recording?.let {
+                            database.recordingDao().updateRecording(
+                                it.copy(
+                                    uploadedBytes = currentUploadedBytes,
+                                    currentChunkProgress = progress.percentComplete
+                                )
+                            )
+                        }
+                    }
+                }
             )
 
             when (result) {
@@ -407,7 +461,19 @@ class UploadService : LifecycleService() {
             val result = uploader.uploadFile(
                 file = manifestFile,
                 key = s3Key,
-                contentType = "application/json"
+                contentType = "application/json",
+                onProgress = { progress ->
+                    val progressMessage = String.format(
+                        "Manifest: %.2f/%.2f KB (%d%%)",
+                        progress.megabytesTransferred * 1024,
+                        progress.totalMegabytes * 1024,
+                        progress.percentComplete
+                    )
+                    notificationManager.notify(
+                        NOTIFICATION_ID,
+                        createNotification(progressMessage, progress.percentComplete)
+                    )
+                }
             )
 
             // Clean up temp file

@@ -21,7 +21,10 @@
       "Bash(findstr:*)",
       "Bash(rm:*)",
       "Read(//c/Users/nirma/OneDrive/Documents/popai/**)",
-      "WebFetch(domain:www.popai.health)"
+      "WebFetch(domain:www.popai.health)",
+      "Bash(where adb)",
+      "Bash(gradlew.bat assembleDebug)",
+      "Bash(./gradlew.bat assembleDebug)"
     ],
     "deny": [],
     "ask": []
