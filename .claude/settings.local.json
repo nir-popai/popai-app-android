@@ -24,7 +24,10 @@
       "WebFetch(domain:www.popai.health)",
       "Bash(where adb)",
       "Bash(gradlew.bat assembleDebug)",
-      "Bash(./gradlew.bat assembleDebug)"
+      "Bash(./gradlew.bat assembleDebug)",
+      "Bash(./gradlew.bat assembleRelease)",
+      "Bash(git add popai-release.apk)",
+      "Bash(git add app/src/main/res/values/strings.xml)"
     ],
     "deny": [],
     "ask": []
