@@ -101,12 +101,13 @@ class MainActivity : AppCompatActivity() {
         // Re-bind to service when app comes to foreground
         bindToExistingService()
 
-        // Register broadcast receiver
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(uploadLogReceiver, IntentFilter(UPLOAD_LOG_ACTION), RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(uploadLogReceiver, IntentFilter(UPLOAD_LOG_ACTION))
-        }
+        // Register broadcast receiver with RECEIVER_NOT_EXPORTED for security
+        ContextCompat.registerReceiver(
+            this,
+            uploadLogReceiver,
+            IntentFilter(UPLOAD_LOG_ACTION),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onPause() {
