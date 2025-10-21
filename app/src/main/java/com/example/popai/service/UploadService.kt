@@ -164,6 +164,14 @@ class UploadService : LifecycleService() {
                         uploadedCount++
                         totalUploadedBytes += chunk.fileSize
                         broadcastLog("Chunk ${index + 1} already uploaded, skipping")
+
+                        // Update recording with current progress
+                        database.recordingDao().updateRecording(
+                            recording.copy(
+                                uploadedChunks = uploadedCount,
+                                failedChunks = failedCount
+                            )
+                        )
                         continue
                     }
 
@@ -188,9 +196,25 @@ class UploadService : LifecycleService() {
                         uploadedCount++
                         totalUploadedBytes += chunk.fileSize
                         broadcastLog("✓ Chunk ${index + 1} uploaded successfully")
+
+                        // Update recording with current progress
+                        database.recordingDao().updateRecording(
+                            recording.copy(
+                                uploadedChunks = uploadedCount,
+                                failedChunks = failedCount
+                            )
+                        )
                     } else {
                         failedCount++
                         broadcastLog("✗ Chunk ${index + 1} failed to upload")
+
+                        // Update recording with current progress
+                        database.recordingDao().updateRecording(
+                            recording.copy(
+                                uploadedChunks = uploadedCount,
+                                failedChunks = failedCount
+                            )
+                        )
                     }
                 }
 
