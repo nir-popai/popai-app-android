@@ -77,8 +77,10 @@ class PresignedUrlService {
      * Request presigned URLs for all files in a recording
      */
     suspend fun requestPresignedUrls(
-        recordingId: String,
-        fileCount: Int
+        patientName: String,
+        healthcareProfessional: String,
+        fileCount: Int,
+        timestamp: String? = null
     ): PresignedUrlResult = withContext(Dispatchers.IO) {
         try {
             val url = URL(PRESIGNED_URL_ENDPOINT)
@@ -93,10 +95,14 @@ class PresignedUrlService {
                 readTimeout = READ_TIMEOUT
             }
 
-            // Create request body
+            // Create request body with new format
             val requestBody = JSONObject().apply {
-                put("recordingId", recordingId)
+                put("patientName", patientName)
+                put("healthcareProfessional", healthcareProfessional)
                 put("fileCount", fileCount)
+                if (timestamp != null) {
+                    put("timestamp", timestamp)
+                }
             }.toString()
 
             // Send request

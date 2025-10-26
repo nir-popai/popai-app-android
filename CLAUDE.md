@@ -98,20 +98,24 @@ adb logcat | findstr "UploadService"
 ### Upload Flow
 
 1. `UploadService` queries all PENDING chunks for recording
-2. Request presigned URL from API for each chunk
-3. PUT request with encrypted audio file to S3
-4. Update `ChunkEntity` with S3 URL and status
-5. After all chunks upload → Generate `manifest.json` → Upload manifest
-6. Update `RecordingEntity` status (UPLOADED/PARTIAL/FAILED)
+2. Request presigned URLs from API by sending patient name, healthcare professional, and file count
+3. Server generates human-readable `recordingId` (e.g., `john_doe_dr_sarah_smith_20251022_143000`)
+4. PUT request with raw audio files to S3 using presigned URLs
+5. Update `ChunkEntity` with S3 URL and status
+6. After all chunks upload → Generate `manifest.json` using server's `recordingId` → Upload manifest
+7. Update `RecordingEntity` status (UPLOADED/PARTIAL/FAILED)
 
 ### Database Schema
 
 **RecordingEntity:**
-- `id` (UUID), `patientName`, `healthcareProfessional`
+- `id` (UUID - local database identifier only, NOT used for S3 uploads)
+- `patientName`, `healthcareProfessional` (sent to API for generating S3 folder name)
 - `startTime`, `endTime`, `totalDurationMs`, `pausedDurationMs`
 - `status` (RECORDING/COMPLETED/UPLOADING/UPLOADED/FAILED/PARTIAL)
 - `chunkCount`, `uploadedChunks`, `failedChunks`
 - `totalBytes`, `uploadedBytes`, `currentChunkProgress`
+
+**Note:** The local `id` (UUID) is only used for database relationships. The server generates a human-readable `recordingId` (e.g., `john_doe_dr_sarah_smith_20251022_143000`) which is used for S3 folder names and in the manifest.json file.
 
 **ChunkEntity:**
 - `id` (UUID), `recordingId` (FK), `chunkIndex`
@@ -129,10 +133,47 @@ S3_BUCKET_NAME=nir-mobile-test
 ```
 
 ### Backend API
-**Presigned URL Endpoint (Hardcoded):**
+**Presigned URL Endpoint:**
 ```
-https://iijdu4x4ac.execute-api.us-east-1.amazonaws.com/prod/upload/presigned-url
+POST https://iijdu4x4ac.execute-api.us-east-1.amazonaws.com/prod/upload/presigned-url
 ```
+
+**Request Format:**
+```json
+{
+  "patientName": "John Doe",
+  "healthcareProfessional": "Dr. Sarah Smith",
+  "fileCount": 2,
+  "timestamp": "2025-10-22T14:30:00Z"  // Optional - defaults to current time if not provided
+}
+```
+
+**Response Format:**
+```json
+{
+  "recordingId": "john_doe_dr_sarah_smith_20251022_143000",
+  "bucketName": "nir-mobile-test",
+  "presignedUrls": [
+    {
+      "file": "manifest.json",
+      "url": "https://...",
+      "key": "medical-recordings/john_doe_dr_sarah_smith_20251022_143000/manifest.json"
+    },
+    {
+      "file": "chunk_0.m4a",
+      "url": "https://...",
+      "key": "medical-recordings/john_doe_dr_sarah_smith_20251022_143000/chunk_0.m4a"
+    }
+  ],
+  "expiresIn": 3600
+}
+```
+
+**Key Points:**
+- Server generates human-readable `recordingId` based on patient name, provider, and timestamp
+- S3 folder names are human-readable (e.g., `john_doe_dr_sarah_smith_20251022_143000`)
+- The server's `recordingId` is used in the `manifest.json`, not the local database UUID
+- Timestamp is formatted in ISO 8601 format using the recording's start time
 
 ### Recording Settings (Hardcoded)
 - **Chunk Duration:** 5 minutes (300,000 ms)
@@ -157,9 +198,10 @@ https://iijdu4x4ac.execute-api.us-east-1.amazonaws.com/prod/upload/presigned-url
 
 ### Chunk Management
 - Chunks are created every 5 minutes during recording
-- Each chunk is encrypted immediately after recording
+- Each chunk is encrypted immediately after recording for local storage
+- **Upload uses raw (unencrypted) files**, not encrypted versions
 - Upload happens sequentially (not parallel) to manage bandwidth
-- Retry logic: 3 attempts with exponential backoff
+- Retry logic: 3 attempts per chunk (max 3 total attempts)
 
 ### Encryption
 - Uses Android Keystore for key generation (hardware-backed when available)
@@ -181,9 +223,16 @@ PENDING → UPLOADING → UPLOADED
 ```
 
 ### File Paths
-- Raw audio chunks: `{externalCacheDir}/recordings/{recordingId}/chunk_{index}.m4a`
-- Encrypted chunks: `{externalCacheDir}/recordings/{recordingId}/chunk_{index}.m4a.enc`
-- Manifest: `{externalCacheDir}/recordings/{recordingId}/manifest.json`
+
+**Local Storage:**
+- Raw audio chunks: `{externalCacheDir}/recordings/{localUUID}/chunk_{index}.m4a`
+- Encrypted chunks: `{externalCacheDir}/recordings/{localUUID}/chunk_{index}.m4a.enc`
+- Manifest (temporary): `{cacheDir}/manifest_{localUUID}.json`
+
+**S3 Storage:**
+- S3 folder: `medical-recordings/{patientName}_{providerName}_{timestamp}/`
+- Example: `medical-recordings/john_doe_dr_sarah_smith_20251022_143000/`
+- Files in S3: `chunk_0.m4a`, `chunk_1.m4a`, ..., `manifest.json`
 
 ### Permissions Required
 - `RECORD_AUDIO` - Microphone access
@@ -250,6 +299,40 @@ PENDING → UPLOADING → UPLOADED
 - [ ] Upload → Check S3 bucket for files
 - [ ] Retry failed upload → Verify attempt counter increments
 - [ ] View recordings list → Verify status updates in real-time
+
+## API Changes and Migration Notes
+
+### Presigned URL API Update (October 2025)
+
+The `/upload/presigned-url` endpoint was updated to generate human-readable folder names instead of UUIDs.
+
+**Changes Made:**
+1. **Request format changed** from:
+   ```json
+   {
+     "recordingId": "550e8400-e29b-41d4-a716-446655440000",
+     "fileCount": 2
+   }
+   ```
+   To:
+   ```json
+   {
+     "patientName": "John Doe",
+     "healthcareProfessional": "Dr. Sarah Smith",
+     "fileCount": 2,
+     "timestamp": "2025-10-22T14:30:00Z"
+   }
+   ```
+
+2. **Updated files:**
+   - `PresignedUrlService.kt` - Changed method signature to accept patient/provider info
+   - `UploadService.kt` - Updated to send new request format and use server's recordingId
+   - `uploadManifest()` function now accepts and uses server-generated recordingId
+
+3. **Benefits:**
+   - S3 folders now have human-readable names (e.g., `john_doe_dr_sarah_smith_20251022_143000`)
+   - Easier to locate specific recordings in S3 console
+   - Manifest uses meaningful recordingId for server processing
 
 ## Troubleshooting
 

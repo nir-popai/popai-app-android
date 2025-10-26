@@ -302,7 +302,7 @@ class RecordingService : LifecycleService() {
         }
     }
 
-    private fun stopCurrentChunk() {
+    private suspend fun stopCurrentChunk() {
         try {
             mediaRecorder?.apply {
                 stop()
@@ -310,13 +310,13 @@ class RecordingService : LifecycleService() {
             }
             mediaRecorder = null
 
-            // Encrypt the chunk
-            lifecycleScope.launch {
-                // Give MediaRecorder time to finalize the file
-                delay(500)
-                encryptCurrentChunk()
-            }
+            // Give MediaRecorder time to finalize the file
+            delay(500)
 
+            // Encrypt the chunk and wait for it to complete
+            encryptCurrentChunk()
+
+            // Only increment after encryption is complete
             currentChunkIndex++
         } catch (e: Exception) {
             e.printStackTrace()

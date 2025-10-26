@@ -119,9 +119,17 @@ class UploadService : LifecycleService() {
 
                 // Request presigned URLs for all files (chunks + manifest)
                 broadcastLog("Requesting presigned URLs from backend...")
+
+                // Format timestamp in ISO 8601 format
+                val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date(recording.startTime))
+
                 val presignedUrlResult = presignedUrlService.requestPresignedUrls(
-                    recordingId = recordingId,
-                    fileCount = chunks.size + 1 // +1 for manifest
+                    patientName = recording.patientName,
+                    healthcareProfessional = recording.healthcareProfessional,
+                    fileCount = chunks.size + 1, // +1 for manifest
+                    timestamp = timestamp
                 )
 
                 when (presignedUrlResult) {
@@ -138,12 +146,14 @@ class UploadService : LifecycleService() {
                     }
                     is PresignedUrlResult.Success -> {
                         broadcastLog("✓ Received ${presignedUrlResult.response.presignedUrls.size} presigned URLs")
+                        broadcastLog("✓ Server-generated recordingId: ${presignedUrlResult.response.recordingId}")
                     }
                 }
 
                 // Create a map of filename -> presigned URL for easy lookup
-                val urlMap = (presignedUrlResult as PresignedUrlResult.Success).response.presignedUrls
-                    .associateBy { it.file }
+                val response = (presignedUrlResult as PresignedUrlResult.Success).response
+                val urlMap = response.presignedUrls.associateBy { it.file }
+                val serverRecordingId = response.recordingId
 
                 // Update recording status with total bytes
                 database.recordingDao().updateRecording(
@@ -255,7 +265,7 @@ class UploadService : LifecycleService() {
                     // Get presigned URL for manifest
                     val manifestUrl = urlMap["manifest.json"]
                     if (manifestUrl != null) {
-                        val manifestSuccess = uploadManifest(recording, updatedChunks, manifestUrl)
+                        val manifestSuccess = uploadManifest(recording, updatedChunks, manifestUrl, serverRecordingId)
                         if (manifestSuccess) {
                             broadcastLog("✓ Manifest file uploaded successfully")
                         } else {
@@ -436,7 +446,8 @@ class UploadService : LifecycleService() {
     private suspend fun uploadManifest(
         recording: RecordingEntity,
         chunks: List<ChunkEntity>,
-        presignedUrl: PresignedUrl
+        presignedUrl: PresignedUrl,
+        serverRecordingId: String
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             broadcastLog("uploadManifest: Received ${chunks.size} total chunks")
@@ -477,9 +488,9 @@ class UploadService : LifecycleService() {
             val totalSizeBytes = chunkInfoList.sumOf { it.sizeBytes }
             val totalDurationMs = chunkInfoList.sumOf { it.durationMs }
 
-            // Create manifest
+            // Create manifest using server-generated recordingId
             val manifest = RecordingManifest(
-                recordingId = recording.id,
+                recordingId = serverRecordingId,
                 recordingStartDate = formatTimestamp(recording.startTime),
                 uploadDate = formatTimestamp(System.currentTimeMillis()),
                 metadata = RecordingMetadata(
